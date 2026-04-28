@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>汽车碰撞吸能对比动态图</title>
+    <title>汽车碰撞吸能对比动态图 (含辅助线)</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
         body {
@@ -74,6 +74,16 @@
         .grid path {
             stroke-width: 0;
         }
+        .highlight-text {
+            font-size: 13px;
+            font-weight: bold;
+            fill: #333;
+        }
+        .v-line {
+            stroke: #999;
+            stroke-dasharray: 5,5;
+            stroke-width: 1.5;
+        }
     </style>
 </head>
 <body>
@@ -103,7 +113,7 @@
 <script>
     // 1. 初始化设置
     const width = 860;
-    const height = 500;
+    const height = 550;
     const margin = { top: 40, right: 150, bottom: 60, left: 100 };
     const innerWidth = width - margin.left - margin.right;
     const innerHeight = height - margin.top - margin.bottom;
@@ -112,16 +122,22 @@
         .append("svg")
         .attr("viewBox", `0 0 ${width} ${height}`);
 
+    // 添加裁剪路径，防止辅助线和点画到坐标轴外面
+    svg.append("defs").append("clipPath")
+        .attr("id", "clip")
+        .append("rect")
+        .attr("width", innerWidth)
+        .attr("height", innerHeight);
+
     const g = svg.append("g")
         .attr("transform", `translate(${margin.left},${margin.top})`);
 
-    // 定义 X 轴和 Y 轴的比例尺
+    // 定义比例尺 (X轴固定为 0-5000)
     const xScale = d3.scaleLinear().domain([0, 5000]).range([0, innerWidth]);
     const yScale = d3.scaleLinear().range([innerHeight, 0]);
 
     // 绘制坐标轴组和网格组
-    const xAxisG = g.append("g")
-        .attr("transform", `translate(0,${innerHeight})`);
+    const xAxisG = g.append("g").attr("transform", `translate(0,${innerHeight})`);
     const yAxisG = g.append("g");
     const gridG = g.append("g").attr("class", "grid");
 
@@ -141,22 +157,49 @@
         .style("text-anchor", "middle")
         .text("单车吸能E（J）");
 
+    // 创建一个带有裁剪路径的组，用于放置图线和辅助线
+    const plotArea = g.append("g").attr("clip-path", "url(#clip)");
+
     // 预先创建线条路径
-    const pathCollision = g.append("path")
+    const pathCollision = plotArea.append("path")
         .attr("fill", "none")
-        .attr("stroke", "#2196F3") // 蓝色
+        .attr("stroke", "#2196F3")
         .attr("stroke-width", 3);
 
-    const pathAsymptote = g.append("path")
+    const pathAsymptote = plotArea.append("path")
         .attr("fill", "none")
-        .attr("stroke", "#F44336") // 红色
+        .attr("stroke", "#F44336")
         .attr("stroke-width", 2)
         .attr("stroke-dasharray", "6,4");
 
-    const pathWall = g.append("path")
+    const pathWall = plotArea.append("path")
         .attr("fill", "none")
-        .attr("stroke", "#4CAF50") // 绿色
+        .attr("stroke", "#4CAF50")
         .attr("stroke-width", 3);
+
+    // 预先创建辅助线和交点元素
+    const vLine = plotArea.append("line").attr("class", "v-line");
+
+    const vLineText = plotArea.append("text")
+        .attr("class", "highlight-text")
+        .style("fill", "#666")
+        .style("font-size", "12px");
+
+    const circleCollision = plotArea.append("circle")
+        .attr("r", 5)
+        .attr("fill", "#2196F3");
+
+    const textCollision = plotArea.append("text")
+        .attr("class", "highlight-text")
+        .attr("fill", "#2196F3");
+
+    const circleWall = plotArea.append("circle")
+        .attr("r", 5)
+        .attr("fill", "#4CAF50");
+
+    const textWall = plotArea.append("text")
+        .attr("class", "highlight-text")
+        .attr("fill", "#4CAF50");
 
     // 绘制图例
     const legendData = [
@@ -191,24 +234,19 @@
 
     // 2. 核心更新函数
     function updateChart() {
-        // 获取控件值
         const m2 = +document.getElementById("m2").value;
         const v_kmh = +document.getElementById("v").value;
         const v3_kmh = +document.getElementById("v3").value;
 
-        // 更新显示数值
         document.getElementById("m2-val").textContent = m2;
         document.getElementById("v-val").textContent = v_kmh;
         document.getElementById("v3-val").textContent = v3_kmh;
 
-        // 速度单位换算 (km/h -> m/s)
         const v_ms = v_kmh / 3.6;
         const v3_ms = v3_kmh / 3.6;
 
-        // 生成 X 轴数据点 (0 到 5000)
         const xData = d3.range(0, 5001, 50);
 
-        // 计算曲线数据
         const dataCollision = xData.map(x => ({
             x: x,
             y: (x * m2 / (x + m2)) * Math.pow(v_ms, 2)
@@ -219,38 +257,100 @@
             y: 0.5 * x * Math.pow(v3_ms, 2)
         }));
 
-        // 计算极值用于动态调整 Y 轴
         const maxAsymptote = m2 * Math.pow(v_ms, 2);
-        const maxWall = 0.5 * 5000 * Math.pow(v3_ms, 2); // 撞墙在 x=5000 时的值
+        const maxWall = 0.5 * 5000 * Math.pow(v3_ms, 2);
         const maxY = Math.max(maxAsymptote, maxWall);
 
-        // 更新 Y 轴比例尺 (留出10%顶部边距)
-        yScale.domain([0, maxY * 1.1]);
+        // 防止 maxY = 0 导致比例尺异常
+        yScale.domain([0, maxY > 0 ? maxY * 1.1 : 1]);
 
-        // 定义线条生成器
         const lineGen = d3.line()
             .x(d => xScale(d.x))
             .y(d => yScale(d.y));
 
-        // 绘制坐标轴 (Y轴强制纯数字格式化，不用缩写)
         xAxisG.call(d3.axisBottom(xScale));
-        yAxisG.call(d3.axisLeft(yScale).tickFormat(d3.format("d"))); // "d" 代表纯整数显示
+        yAxisG.call(d3.axisLeft(yScale).tickFormat(d3.format("d")));
+        gridG.call(d3.axisLeft(yScale).tickSize(-innerWidth).tickFormat(""));
 
-        // 绘制水平网格线
-        gridG.call(d3.axisLeft(yScale)
-            .tickSize(-innerWidth)
-            .tickFormat("")
-        );
-
-        // 更新曲线路径
         pathCollision.datum(dataCollision).attr("d", lineGen);
         pathWall.datum(dataWall).attr("d", lineGen);
+        pathAsymptote
+            .datum([{ x: 0, y: maxAsymptote }, { x: 5000, y: maxAsymptote }])
+            .attr("d", lineGen);
 
-        // 更新渐近线路径
-        pathAsymptote.datum([
-            { x: 0, y: maxAsymptote },
-            { x: 5000, y: maxAsymptote }
-        ]).attr("d", lineGen);
+        // --- 辅助线与交点计算逻辑 ---
+        const yCollisionAtM2 = 0.5 * m2 * Math.pow(v_ms, 2);
+        const yWallAtM2 = 0.5 * m2 * Math.pow(v3_ms, 2);
+
+        // 更新垂直辅助线
+        vLine.attr("x1", xScale(m2))
+             .attr("y1", 0)
+             .attr("x2", xScale(m2))
+             .attr("y2", innerHeight);
+
+        // 更新圆点坐标
+        circleCollision
+            .attr("cx", xScale(m2))
+            .attr("cy", yScale(yCollisionAtM2));
+
+        circleWall
+            .attr("cx", xScale(m2))
+            .attr("cy", yScale(yWallAtM2));
+
+        // 文本方向设置
+        const textOffsetX = m2 > 4000 ? -12 : 12;
+        const textAnchor = m2 > 4000 ? "end" : "start";
+
+        // 两个点的屏幕坐标
+        const collisionScreenY = yScale(yCollisionAtM2);
+        const wallScreenY = yScale(yWallAtM2);
+
+        // 默认标签位置：蓝色在点上方，绿色在点下方
+        let collisionLabelY = collisionScreenY - 16;
+        let wallLabelY = wallScreenY + 22;
+
+        // 如果标签太近，则进一步拉开
+        if (Math.abs(collisionLabelY - wallLabelY) < 28) {
+            collisionLabelY = collisionScreenY - 22;
+            wallLabelY = wallScreenY + 28;
+        }
+
+        // 如果绿色标签太靠近底部，则移到点上方
+        if (wallLabelY > innerHeight - 5) {
+            wallLabelY = wallScreenY - 18;
+        }
+
+        // 如果蓝色标签太靠近顶部，则移到点下方
+        if (collisionLabelY < 15) {
+            collisionLabelY = collisionScreenY + 20;
+        }
+
+        // 蓝色：E1
+        textCollision.attr("x", xScale(m2) + textOffsetX)
+                     .attr("y", collisionLabelY)
+                     .style("text-anchor", textAnchor)
+                     .text(`E1: ${Math.round(yCollisionAtM2)}`);
+
+        // 绿色：E3
+        textWall.attr("x", xScale(m2) + textOffsetX)
+                .attr("y", wallLabelY)
+                .style("text-anchor", textAnchor)
+                .text(`E3: ${Math.round(yWallAtM2)}`);
+
+        // 垂直辅助线顶部说明文字，位置上移，和数值标签拉开
+        vLineText.attr("x", xScale(m2) + textOffsetX)
+                 .attr("y", 8)
+                 .style("text-anchor", textAnchor)
+                 .text(`撞击物质量 = m2`);
+
+        // 如果 m2 大于横坐标最大值 (5000)，隐藏辅助线元素
+        const opacity = m2 > 5000 ? 0 : 1;
+        vLine.style("opacity", opacity);
+        vLineText.style("opacity", opacity);
+        circleCollision.style("opacity", opacity);
+        textCollision.style("opacity", opacity);
+        circleWall.style("opacity", opacity);
+        textWall.style("opacity", opacity);
     }
 
     // 3. 绑定事件监听器
